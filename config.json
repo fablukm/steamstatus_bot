@@ -1,8 +1,8 @@
 {
     "telegram_bot_token": "TelegramTokenGivenBy@BotFather",
     "steam_api_token": "SteamApiToken",
-    "player_steam_ids": {"UserName": "UserToken",
-                         "OtherUserName": "OtherUserToken"},
+    "player_steam_ids": {"UserName": "UserID",
+                         "OtherUserName": "OtherUserID"},
     "game_steam_id": "359550",
     "personastates": ["Offline",
                       "Online",
