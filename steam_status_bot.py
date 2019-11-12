@@ -146,6 +146,19 @@ class SteamStatusFinder(object):
                     key, states[int(status[key]['personastate'])]))
         return '\n'.join(out)
 
+    def get_is_playing(self):
+        if not hasattr(self, 'steam_api'):
+            self.connect()
+        states = self.config['personastates']
+        status = self._get_user_status()
+
+        is_pl = {key: 'gameid' in status[key].keys() for key in status.keys()}
+
+        is_pl_r6 = {key: True if is_pl[key] and status[key]['gameid']
+                    in self.config['game_steam_id'] else False for key in status.keys()}
+
+        return is_pl_r6
+
     def _get_user_status(self):
         ids = self.config['player_steam_ids']
         token = self.config['steam_api_token']
