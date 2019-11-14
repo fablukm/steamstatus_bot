@@ -19,17 +19,14 @@ class TelegramBot(object):
     methods:
         read_config(): Reads and loads the configuration from the file.
                        Returns: config (dict) with configuration.
-        set_handlers(): Defines the interaction with the bot.
-                        To add a command, define a nested function containing
-                        functionality for the command, best as a wrapper.
-                        Functions must take as input: update, context
-                        Returns: handlers (dict) with structure:
-                            {'bot_command': function_to_be_called}
+        set_commands(): Defines the interaction with the bot.
+                        To add a command, define a nested function containing the definition of the command, best as a wrapper.
+        define_job_queue(): Defines jobs to be executed periodically.
         configure_bot(): Add all handlers defined in set_handlers()
                          to the bot. Additional configuration belongs here.
                          Returns nothing.
         start_bot(): Start the bot using configuration as in configfile
-                     and set_handlers(). Returns nothing.
+                     and set_commands(). Returns nothing.
 
     Usage example to start the bot:
         Configure the bot as described in Readme.md and run
@@ -39,12 +36,6 @@ class TelegramBot(object):
 
         Now, the bot is accessible on telegram with one command /status
     '''
-
-    def __init__(self, configfile='./config.json'):
-        self._configfile = configfile
-        self.config = self.read_config()
-        return
-
     def read_config(self):
         try:
             with open(self._configfile, 'r') as handle:
@@ -52,39 +43,90 @@ class TelegramBot(object):
                 logging.info('Config loaded from {}'.format(self._configfile))
         except FileNotFoundError:
             logging.info('File not found: {}'.format(self._configfile))
-            raise FileNotFoundError(
-                'File not found: {}'.format(self._configfile))
+            raise FileNotFoundError('File not found: {}'.format(self._configfile))
         return config
 
-    def set_handlers(self):
-        steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
+    def set_commands(self):
+        if not hasattr(self, 'steamstatusfinder'):
+            self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
 
         def handle_status(update, context):
-            msg = steamstatusfinder.get_status_string()
+            msg = self.steamstatusfinder.get_status_string()
             context.bot.send_message(update.effective_chat.id, text=msg)
+            return
 
-        handlers = {'status': handle_status}
+        def handle_spammers(update, context):
+            msg = 'Leave me in peace, spammers.'
+            context.bot.send_message(update.effective_chat.id, text=msg)
+            return
+
+        handlers = {'status': handle_status,
+                    'tell_off': handle_spammers}
         return handlers
 
-    def configure_bot(self):
-        bot_commands = self.set_handlers()
+    def define_job_queue(self):
+        if not hasattr(self, 'steamstatusfinder'):
+            self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
 
+        is_playing_r6s = self.steamstatusfinder.get_is_playing()
+
+        msg = ''
+        do_display = False
+        for key in is_playing_r6s.keys():
+            old_status = self.user_status[key]
+            new_status = is_playing_r6s[key]
+
+            if not (new_status == old_status):
+                do_display = True
+                verb = 'started' if new_status else 'stopped'
+                msg += '{} {} playing R6S\n'.format(key, verb)
+
+            self.user_status[key] = new_status
+
+        return do_display, msg
+
+    def configure_bot(self):
+        bot_commands = self.set_commands()
+
+        # initialise updater
         telegram_token = self.config['telegram_bot_token']
         self.updater = Updater(token=telegram_token, use_context=True)
         self.dispatcher = self.updater.dispatcher
 
+        # dispatch commands
         for key in bot_commands:
             self.dispatcher.add_handler(CommandHandler(key, bot_commands[key]))
 
+        # define job queue
+        if not hasattr(self, 'steamstatusfinder'):
+            self.steamstatusfinder = \
+                SteamStatusFinder(configfile=self._configfile)
+        self.user_status = self.steamstatusfinder.get_is_playing()
+
+        def _callback_status(context):
+            print('running job queue...')
+
+            do_display, msg = self.define_job_queue()
+
+            if do_display:
+                logging.info('    sending message: {}'.format(msg))
+                context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
+            else:
+                logging.info('    no changes. not sending message.')
+            return
+
+        dt = int(self.config["time_interval"])
+        job_queue = self.updater.job_queue
+        job_queue.run_repeating(_callback_status, interval=dt)
         return
 
     def start_bot(self):
         if not hasattr(self, 'updater'):
             self.configure_bot()
         self.updater.start_polling()
-        logging.info('Bot running...')
-        print('Bot running...')
+        logging.info('Bot running')
         return
+
 
 
 class SteamStatusFinder(object):
