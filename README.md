@@ -13,8 +13,10 @@ Edit the config.json file to your requirements as follows:
 In the field `player_steam_ids` replace `UserName` by the name of the user and `UserID` by the Steam ID you have found.
 3. [Here is an official how-to](https://core.telegram.org/bots#6-botfather)
 Now you need to configure your bot. Open Telegram, connect to @BotFather. Use `/newbot` to get a token. Enter the token to `config.json`.
-4. To make sure the bot will be sending automatic updates to the correct group chat, add `chat_id` to the configuration in `config.json`. You can find instructions on how to get your group chat ID [here](https://stackoverflow.com/questions/32423837/telegram-bot-how-to-get-a-group-chat-id).
-The configuration entry `time_interval` is the number of seconds after which the job queue (periodically executed tasks) will be executed again.
+4. The bot will be sending automatic updates to the group chat. 
+  a. Firstly, to define the group chats the bot will be posting to, add `chat_id` to the configuration in `config.json`. You can find instructions on how to get your group chat ID [here](https://stackoverflow.com/questions/32423837/telegram-bot-how-to-get-a-group-chat-id).
+  b. Currently, the bot is going to send updates if configured players will be logging into Rainbow Six Siege. To use it for other games, [find the corresponding Steam game ID](https://gaming.stackexchange.com/questions/149837/how-do-i-find-the-id-for-a-game-on-steam) and add it to `config.json` in `game_steam_id`.
+  c. The configuration entry `time_interval` is the number of seconds after which the job queue (periodically executed tasks) will be executed again.
 5. Start the bot with `python steam_status_bot.py` on the server and your bot is online. By default, the bot only know one command: `/status` will show a formatted string of the users you defined and their respective status.
 
 # How to add new commands:
