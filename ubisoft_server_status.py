@@ -49,7 +49,7 @@ class UbisoftServerStatusPoller:
 
 
 def make_rainbow_six_siege_poller(print_on_first_run = False):
-    status_checker =  status = UbisoftServerStatus(GAME_IDS['Rainbow Six Siege'])
+    status_checker = UbisoftServerStatus(GAME_IDS['Rainbow Six Siege'])
     poller = UbisoftServerStatusPoller(status_checker, print_on_first_run=print_on_first_run)
     return poller
 
