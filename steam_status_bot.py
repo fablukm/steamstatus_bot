@@ -3,6 +3,7 @@ from telegram.ext import Updater, CommandHandler
 import logging
 import json
 import steam
+from ubisoft_server_status import make_rainbow_six_siege_poller
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=logformat, level=logging.INFO,
@@ -103,16 +104,23 @@ class TelegramBot(object):
                 SteamStatusFinder(configfile=self._configfile)
         self.user_status = self.steamstatusfinder.get_is_playing()
 
+        r6s_server_poller = make_rainbow_six_siege_poller(print_on_first_run=True)
+
+        self.status_checkers = [
+            self.define_job_queue,
+            r6s_server_poller
+        ]
+
         def _callback_status(context):
             print('running job queue...')
+            for status_checker in self.status_checkers:
+                do_display, msg = status_checker()
 
-            do_display, msg = self.define_job_queue()
-
-            if do_display:
-                logging.info('    sending message: {}'.format(msg))
-                context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
-            else:
-                logging.info('    no changes. not sending message.')
+                if do_display:
+                    logging.info('    sending message: {}'.format(msg))
+                    context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
+                else:
+                    logging.info('    no changes. not sending message.')
             return
 
         dt = int(self.config["time_interval"])
