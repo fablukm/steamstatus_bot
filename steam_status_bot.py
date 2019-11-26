@@ -3,7 +3,7 @@ from telegram.ext import Updater, CommandHandler
 import logging
 import json
 import steam
-from ubisoft_server_status import make_rainbow_six_siege_poller
+import urllib.request
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=logformat, level=logging.INFO,
@@ -38,6 +38,21 @@ class TelegramBot(object):
         Now, the bot is accessible on telegram with one command /status
     '''
 
+    def __init__(self, configfile='./config.json'):
+        # read config file
+        self._configfile = configfile
+        self.config = self.read_config()
+
+        # open instances of external APIs
+        self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
+        self.ubiserverpoller = UbiServerStatusFinder(
+            configfile=self._configfile)
+
+        # initial call to job queue callbacks
+        self.user_status = self.steamstatusfinder.get_is_playing()
+        self.server_status = self.ubiserverpoller.run_query()
+        return
+
     def read_config(self):
         try:
             with open(self._configfile, 'r') as handle:
@@ -50,40 +65,49 @@ class TelegramBot(object):
         return config
 
     def set_commands(self):
-        if not hasattr(self, 'steamstatusfinder'):
-            self.steamstatusfinder = SteamStatusFinder(
-                configfile=self._configfile)
-
         def handle_status(update, context):
             msg = self.steamstatusfinder.get_status_string()
             context.bot.send_message(update.effective_chat.id, text=msg)
             return
 
-        handlers = {'status': handle_status}
+        def handle_server_status(update, context):
+            msg = self.ubiserverpoller.get_message()
+            context.bot.send_message(update.effective_chat.id, text=msg)
+            return
+
+        handlers = {'status': handle_status,
+                    'server_status': handle_server_status}
         return handlers
 
     def define_job_queue(self):
-        if not hasattr(self, 'steamstatusfinder'):
-            self.steamstatusfinder = SteamStatusFinder(
-                configfile=self._configfile)
-
-        # get momentaneous user status
-        new_status_all = self.steamstatusfinder.get_is_playing()
-
         msg = ''
         do_display = False
-        # for each user, check
-        for user in new_status_all.keys():
+
+        # get momentaneous user status
+        new_user_status_all = self.steamstatusfinder.get_is_playing()
+        for user in new_user_status_all.keys():
             old_status = self.user_status[user]
-            new_status = new_status_all[user]
+            new_status = new_user_status_all[user]
 
             if not (new_status['is_pl'] == old_status['is_pl']):
                 do_display = True
                 verb = 'started' if new_status else 'stopped'
-                game = new_status['game'] if new_status else ''
-                msg += '{} {} playing {}\n'.format(user, verb, game)
+                game = ' '+new_status['game'] if new_status else ''
+                msg += f'{user} {verb} playing{game}.\n'
 
-            self.user_status[user] = new_status
+        self.user_status = new_user_status_all
+
+        # get momentaneous ubi server status
+        new_server_status = self.ubiserverpoller.run_query()
+        for game in new_server_status.keys():
+            old_status = self.server_status[game]
+            new_status = new_server_status[game]
+
+            if not (new_status == old_status):
+                msg += f'Servers for {game} are {new_status}.\n'
+                do_display = True
+
+        self.server_status = new_server_status
 
         return do_display, msg
 
@@ -91,6 +115,7 @@ class TelegramBot(object):
         '''
         TelegramBot.configure_bot(): Defines commands and reads job queue.
         '''
+        # get all bot commands
         bot_commands = self.set_commands()
 
         # initialise updater
@@ -102,32 +127,17 @@ class TelegramBot(object):
         for key in bot_commands:
             self.dispatcher.add_handler(CommandHandler(key, bot_commands[key]))
 
-        # define job queue
-        if not hasattr(self, 'steamstatusfinder'):
-            self.steamstatusfinder = \
-                SteamStatusFinder(configfile=self._configfile)
-        self.user_status = self.steamstatusfinder.get_is_playing()
-
-        r6s_server_poller = make_rainbow_six_siege_poller(
-            print_on_first_run=True)
-
-        # TODO FMU: integrate ubi status check
-        self.status_checkers = [
-            self.define_job_queue,
-            r6s_server_poller
-        ]
-
+        # Configure callback to job queue
         def _callback_status(context):
-            print('running job queue...')
-            for status_checker in self.status_checkers:
-                do_display, msg = status_checker()
+            logging.info('running job queue...')
+            do_display, msg = self.define_job_queue()
 
-                if do_display:
-                    logging.info('    sending message: {}'.format(msg))
-                    context.bot.send_message(chat_id=int(
-                        self.config['chat_id']), text=msg)
-                else:
-                    logging.info('    no changes. not sending message.')
+            if do_display:
+                logging.info('    sending message: {}'.format(msg))
+                context.bot.send_message(chat_id=int(
+                    self.config['chat_id']), text=msg)
+            else:
+                logging.debug('    no changes. not sending message.')
             return
 
         dt = int(self.config["time_interval"])
@@ -168,15 +178,16 @@ class SteamStatusFinder(object):
         logging.info('Opening SteamStatusFinder instance')
         self._configfile = configfile
         self.config = self.read_config()
+        self.connect()
         return
 
     def read_config(self):
         try:
             with open(self._configfile, 'r') as handle:
                 config = json.load(handle)
-                logging.info('Config loaded from {}'.format(self._configfile))
         except FileNotFoundError:
-            logging.info('File not found: {}'.format(self._configfile))
+            logging.info(
+                'SSF config File not found: {}'.format(self._configfile))
             raise FileNotFoundError(
                 'File not found: {}'.format(self._configfile))
         return config
@@ -188,8 +199,6 @@ class SteamStatusFinder(object):
         return
 
     def get_status_string(self):
-        if not hasattr(self, 'steam_api'):
-            self.connect()
         states = self.config['personastates']
         status = self._get_user_status()
         out = []
@@ -203,8 +212,6 @@ class SteamStatusFinder(object):
         return '\n'.join(out)
 
     def get_is_playing(self):
-        if not hasattr(self, 'steam_api'):
-            self.connect()
         states = self.config['personastates']
         status = self._get_user_status()
 
@@ -237,27 +244,25 @@ class UbiServerStatusFinder(object):
     '''
     UbiServerStatusFinder connects to the steam API and implements a status finder.
 
+
     args:
         configfile (str): path to the config.json file. Default: ./config.json
 
     methods:
         read_config(): Reads and loads the configuration from the file.
                        Returns: config (dict) with configuration.
-        connect(): Connects to the steam API.
-                   Returns nothing, but adds an instance of steam.WebAPI
-                   as attribute to self.
-        get_status_string(): Reads in all the user IDs from the config file.
-                             Returns: a formatted string with their status.
+        query(): Connects to the ubi server and finds status
+        get_message(): Format results to a human-readable message
 
-    Usage example to start the bot:
-        steam_status_finder = SteamStatusFinder(configfile='./config.json')
-        print(steam_status_finder.get_status_string())
+    Based on gist by Kjetil Lye, 2019
     '''
 
     def __init__(self, configfile='./config.json'):
         logging.info('Opening UbiServerStatusFinder instance')
         self._configfile = configfile
         self.config = self.read_config()
+
+        self.url_base = 'https://game-status-api.ubisoft.com/v1/instances?appIds={game_id}'
         return
 
     def read_config(self):
@@ -271,11 +276,24 @@ class UbiServerStatusFinder(object):
                 'File not found: {}'.format(self._configfile))
         return config
 
-    def connect(self):
-        return
+    def run_query(self, timeout=10):
+        game_ids = self.config['game_ids']
+        server_status = {}
+        for game in self.config['game_ids'].keys():
+            if not 'ubi_id' in game_ids[game]:
+                continue
 
-    def get_status_string(self):
-        return
+            url = self.url_base.format(game_id=game_ids[game]['ubi_id'])
+            with urllib.request.urlopen(url, timeout=timeout) as request:
+                json_data = json.load(request)
+                server_status[game] = json_data[0]['Status']
+        return server_status
+
+    def get_message(self):
+        server_status = self.run_query()
+        msg = '\n'.join(['{} servers are {}.'.format(game, status)
+                         for game, status in server_status.items()])
+        return msg
 
 
 if __name__ == '__main__':
