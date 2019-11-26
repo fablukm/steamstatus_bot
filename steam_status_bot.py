@@ -6,7 +6,7 @@ import steam
 import urllib.request
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(format=logformat, level=logging.INFO,
+logging.basicConfig(format=logformat, level=logging.DEBUG,
                     filename='./steam_status_bot.log', filemode='w')
 
 
@@ -131,11 +131,11 @@ class TelegramBot(object):
         def _callback_status(context):
             logging.info('running job queue...')
             do_display, msg = self.define_job_queue()
-
+            logging.debug(f'    message: {msg}')
             if do_display:
-                logging.info('    sending message: {}'.format(msg))
-                context.bot.send_message(chat_id=int(
-                    self.config['chat_id']), text=msg)
+                logging.debug('    sending message.')
+                #context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
+                print(msg)
             else:
                 logging.debug('    no changes. not sending message.')
             return
@@ -216,7 +216,7 @@ class SteamStatusFinder(object):
         status = self._get_user_status()
 
         # which games are checked
-        game_ids = {game['steam_id']: game
+        game_ids = {self.config['game_ids'][game]['steam_id']: game
                     for game in self.config['game_ids'].keys()}
 
         # what are users even playing
@@ -231,12 +231,13 @@ class SteamStatusFinder(object):
         return is_pl_valid
 
     def _get_user_status(self):
-        ids = self.config['player_steam_ids']
+        ids = {user: self.config["player_ids"][user]["steam"]
+               for user in self.config['player_ids'].keys()}
         token = self.config['steam_api_token']
         api = self.steam_api
-        return {key:
+        return {user:
                 api.ISteamUser.GetPlayerSummaries(key=token,
-                                                  steamids=user[key])['response']['players'][0]
+                                                  steamids=ids[user])['response']['players'][0]
                 for user in ids.keys()}
 
 
