@@ -37,6 +37,7 @@ class TelegramBot(object):
 
         Now, the bot is accessible on telegram with one command /status
     '''
+
     def read_config(self):
         try:
             with open(self._configfile, 'r') as handle:
@@ -44,49 +45,52 @@ class TelegramBot(object):
                 logging.info('Config loaded from {}'.format(self._configfile))
         except FileNotFoundError:
             logging.info('File not found: {}'.format(self._configfile))
-            raise FileNotFoundError('File not found: {}'.format(self._configfile))
+            raise FileNotFoundError(
+                'File not found: {}'.format(self._configfile))
         return config
 
     def set_commands(self):
         if not hasattr(self, 'steamstatusfinder'):
-            self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
+            self.steamstatusfinder = SteamStatusFinder(
+                configfile=self._configfile)
 
         def handle_status(update, context):
             msg = self.steamstatusfinder.get_status_string()
             context.bot.send_message(update.effective_chat.id, text=msg)
             return
 
-        def handle_spammers(update, context):
-            msg = 'Leave me in peace, spammers.'
-            context.bot.send_message(update.effective_chat.id, text=msg)
-            return
-
-        handlers = {'status': handle_status,
-                    'tell_off': handle_spammers}
+        handlers = {'status': handle_status}
         return handlers
 
     def define_job_queue(self):
         if not hasattr(self, 'steamstatusfinder'):
-            self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
+            self.steamstatusfinder = SteamStatusFinder(
+                configfile=self._configfile)
 
-        is_playing_r6s = self.steamstatusfinder.get_is_playing()
+        # get momentaneous user status
+        new_status_all = self.steamstatusfinder.get_is_playing()
 
         msg = ''
         do_display = False
-        for key in is_playing_r6s.keys():
-            old_status = self.user_status[key]
-            new_status = is_playing_r6s[key]
+        # for each user, check
+        for user in new_status_all.keys():
+            old_status = self.user_status[user]
+            new_status = new_status_all[user]
 
-            if not (new_status == old_status):
+            if not (new_status['is_pl'] == old_status['is_pl']):
                 do_display = True
                 verb = 'started' if new_status else 'stopped'
-                msg += '{} {} playing R6S\n'.format(key, verb)
+                game = new_status['game'] if new_status else ''
+                msg += '{} {} playing {}\n'.format(user, verb, game)
 
-            self.user_status[key] = new_status
+            self.user_status[user] = new_status
 
         return do_display, msg
 
     def configure_bot(self):
+        '''
+        TelegramBot.configure_bot(): Defines commands and reads job queue.
+        '''
         bot_commands = self.set_commands()
 
         # initialise updater
@@ -104,8 +108,10 @@ class TelegramBot(object):
                 SteamStatusFinder(configfile=self._configfile)
         self.user_status = self.steamstatusfinder.get_is_playing()
 
-        r6s_server_poller = make_rainbow_six_siege_poller(print_on_first_run=True)
+        r6s_server_poller = make_rainbow_six_siege_poller(
+            print_on_first_run=True)
 
+        # TODO FMU: integrate ubi status check
         self.status_checkers = [
             self.define_job_queue,
             r6s_server_poller
@@ -118,7 +124,8 @@ class TelegramBot(object):
 
                 if do_display:
                     logging.info('    sending message: {}'.format(msg))
-                    context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
+                    context.bot.send_message(chat_id=int(
+                        self.config['chat_id']), text=msg)
                 else:
                     logging.info('    no changes. not sending message.')
             return
@@ -134,7 +141,6 @@ class TelegramBot(object):
         self.updater.start_polling()
         logging.info('Bot running')
         return
-
 
 
 class SteamStatusFinder(object):
@@ -189,10 +195,10 @@ class SteamStatusFinder(object):
         out = []
         for key in status.keys():
             if 'gameid' in status[key]:
-                out.append('{}:\tStatus \"{}\" and playing \"{}\"'.format(
+                out.append('{}:\t{} and playing {}'.format(
                     key, states[int(status[key]['personastate'])], status[key]['gameextrainfo']))
             else:
-                out.append('{}:\tStatus \"{}\" '.format(
+                out.append('{}:\t{} '.format(
                     key, states[int(status[key]['personastate'])]))
         return '\n'.join(out)
 
@@ -202,12 +208,20 @@ class SteamStatusFinder(object):
         states = self.config['personastates']
         status = self._get_user_status()
 
-        is_pl = {key: 'gameid' in status[key].keys() for key in status.keys()}
+        # which games are checked
+        game_ids = {game['steam_id']: game
+                    for game in self.config['game_ids'].keys()}
 
-        is_pl_r6 = {key: True if is_pl[key] and status[key]['gameid']
-                    in self.config['game_steam_id'] else False for key in status.keys()}
+        # what are users even playing
+        is_pl = {user: 'gameid' in status[user].keys()
+                 for user in status.keys()}
 
-        return is_pl_r6
+        # are users playing a game in the list?
+        is_pl_valid = {user: {'is_pl': True, 'game': game_ids[status[user]['gameid']]}
+                       if is_pl[user] and status[user]['gameid'] in list(game_ids.keys())
+                       else {'is_pl': False, 'game': None} for user in status.keys()}
+
+        return is_pl_valid
 
     def _get_user_status(self):
         ids = self.config['player_steam_ids']
@@ -215,8 +229,53 @@ class SteamStatusFinder(object):
         api = self.steam_api
         return {key:
                 api.ISteamUser.GetPlayerSummaries(key=token,
-                                                  steamids=ids[key])['response']['players'][0]
-                for key in ids.keys()}
+                                                  steamids=user[key])['response']['players'][0]
+                for user in ids.keys()}
+
+
+class UbiServerStatusFinder(object):
+    '''
+    UbiServerStatusFinder connects to the steam API and implements a status finder.
+
+    args:
+        configfile (str): path to the config.json file. Default: ./config.json
+
+    methods:
+        read_config(): Reads and loads the configuration from the file.
+                       Returns: config (dict) with configuration.
+        connect(): Connects to the steam API.
+                   Returns nothing, but adds an instance of steam.WebAPI
+                   as attribute to self.
+        get_status_string(): Reads in all the user IDs from the config file.
+                             Returns: a formatted string with their status.
+
+    Usage example to start the bot:
+        steam_status_finder = SteamStatusFinder(configfile='./config.json')
+        print(steam_status_finder.get_status_string())
+    '''
+
+    def __init__(self, configfile='./config.json'):
+        logging.info('Opening UbiServerStatusFinder instance')
+        self._configfile = configfile
+        self.config = self.read_config()
+        return
+
+    def read_config(self):
+        try:
+            with open(self._configfile, 'r') as handle:
+                config = json.load(handle)
+                logging.info('Config loaded from {}'.format(self._configfile))
+        except FileNotFoundError:
+            logging.info('File not found: {}'.format(self._configfile))
+            raise FileNotFoundError(
+                'File not found: {}'.format(self._configfile))
+        return config
+
+    def connect(self):
+        return
+
+    def get_status_string(self):
+        return
 
 
 if __name__ == '__main__':
