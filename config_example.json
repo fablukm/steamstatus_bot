@@ -1,0 +1,22 @@
+{
+    "telegram_bot_token": "Token given by BotFather",
+    "steam_api_token": "Steam API Token",
+    "player_ids": {"Player1": {"steam": "SteamPlayerID",
+                               "uplay": "UplayPlayerID"},
+                   "Player2": {"steam": "SteamPlayerID",
+                               "uplay": "UplayPlayerID"}
+                    },
+    "game_ids": {"Siege": {"steam_id": "359550",
+                           "ubi_id": "e3d5ea9e-50bd-43b7-88bf-39794f4e3d40"
+                          }
+                },
+    "chat_id": "Group Chat ID",
+    "time_interval": 1,
+    "personastates": ["Offline",
+                      "Online",
+                      "Busy",
+                      "Away",
+                      "Snooze",
+                      "looking to trade",
+                      "looking to play"]
+}
