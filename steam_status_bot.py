@@ -3,10 +3,12 @@ from telegram.ext import Updater, CommandHandler
 import logging
 import json
 import steam
-import urllib.request
+from urllib.request import Request, urlopen
+
+DEBUG=False
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(format=logformat, level=logging.DEBUG,
+logging.basicConfig(format=logformat, level=logging.INFO,
                     filename='./steam_status_bot.log', filemode='w')
 
 
@@ -47,6 +49,7 @@ class TelegramBot(object):
         self.steamstatusfinder = SteamStatusFinder(configfile=self._configfile)
         self.ubiserverpoller = UbiServerStatusFinder(
             configfile=self._configfile)
+        self.tabwirepoller = R6TabPoller()
 
         # initial call to job queue callbacks
         self.user_status = self.steamstatusfinder.get_is_playing()
@@ -68,15 +71,39 @@ class TelegramBot(object):
         def handle_status(update, context):
             msg = self.steamstatusfinder.get_status_string()
             context.bot.send_message(update.effective_chat.id, text=msg)
+            logging.info(f'Sent message {msg}')
             return
 
         def handle_server_status(update, context):
             msg = self.ubiserverpoller.get_message()
             context.bot.send_message(update.effective_chat.id, text=msg)
+            logging.info(f'Sent message {msg}')
             return
 
-        handlers = {'status': handle_status,
-                    'server_status': handle_server_status}
+        def handle_stats(update, context):
+            msg = self.tabwirepoller.get_message()
+            context.bot.send_message(update.effective_chat.id, text=msg)
+            logging.info(f'Sent message {msg}')
+            return
+
+        def handle_help(update, context):
+            helps = [r'I update this group chat whenever someone starts/stops playing, and/or the servers are down or up again.','',
+                     r'You can use the following commands, either here for everyone to see or in a private chat with me, the bot:',
+                     r'    \player_status: Show who is playing and who is not.',
+                     r'    \server_status: Show whether the servers are online.',
+                     r'    \stats: Show basic statistics.',
+                     r'    \help: Show this message.']
+            msg = '\n'.join(helps)
+            if DEBUG:
+                print(msg)
+            else:
+                context.bot.send_message(update.effective_chat.id, text=msg)
+            return
+
+        handlers = {'player_status': handle_status,
+                    'server_status': handle_server_status,
+                    'stats': handle_stats,
+                    'help': handle_help}
         return handlers
 
     def define_job_queue(self):
@@ -134,8 +161,11 @@ class TelegramBot(object):
             logging.debug(f'    message: {msg}')
             if do_display:
                 logging.debug('    sending message.')
-                #context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
-                print(msg)
+
+                if DEBUG:
+                    print(msg)
+                else:
+                    context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
             else:
                 logging.debug('    no changes. not sending message.')
             return
@@ -285,7 +315,7 @@ class UbiServerStatusFinder(object):
                 continue
 
             url = self.url_base.format(game_id=game_ids[game]['ubi_id'])
-            with urllib.request.urlopen(url, timeout=timeout) as request:
+            with urlopen(url, timeout=timeout) as request:
                 json_data = json.load(request)
                 server_status[game] = json_data[0]['Status']
         return server_status
@@ -297,7 +327,83 @@ class UbiServerStatusFinder(object):
         return msg
 
 
+class R6TabPoller(object):
+    def __init__(self, configfile='./config.json'):
+        logging.info('Opening R6TabPoller instance')
+        self._configfile = configfile
+        self.config = self.read_config()
+        self.url_base = 'http://r6tab.com/api/player.php?p_id={player_id}'
+        return
+
+    def read_config(self):
+        try:
+            with open(self._configfile, 'r') as handle:
+                config = json.load(handle)
+                logging.info('Config loaded from {}'.format(self._configfile))
+        except FileNotFoundError:
+            logging.info('File not found: {}'.format(self._configfile))
+            raise FileNotFoundError(
+                'File not found: {}'.format(self._configfile))
+        return config
+
+    def get_user_stats(self, timeout=10):
+        users = {user: self.config['player_ids'][user]['uplay']
+                 for user in self.config['player_ids'].keys()}
+        urls = {user: self.url_base.format(player_id=users[user])
+                for user in users.keys()}
+        user_stats = {}
+        for user in users.keys():
+            url = urls[user]
+
+            try:
+                req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                response = json.load(urlopen(req, timeout=timeout))
+
+                k, d = response['data'][6], response['data'][7]
+                w, l = response['data'][8], response['data'][9]
+                minplayed = response['data'][5]/60.0
+            except URLError:
+                logging.info("Connection error in attempt to connect to TabWire")
+                k, d, w, l, minplayed = 0., 0., 0., 0., 0.
+
+            user_stats[user] = gen_stats(k, d, w, l, minplayed)
+        return user_stats
+
+    def get_message(self):
+        user_stats = self.get_user_stats()
+        msgs = ['{}: \tW/L: {}, \tK/D: {}, \tWinrate: {}, \tMin/Kill: {}'.format(
+            user,
+            user_stats[user]['wl'],
+            user_stats[user]['kd'],
+            user_stats[user]['winrate'],
+            user_stats[user]['minperkill']) for user in user_stats.keys()]
+        msg = '\n'.join(msgs)
+        return msg
+
+
+def gen_stats(k, d, w, l, minplayed):
+    kd = float(k)/float(d) if float(d) > 0. else 0.
+    wl = float(w)/float(l) if float(l) > 0. else 0.
+    winrate = float(w)/(float(w)+float(l)) if float(w)+float(l) > 0. else 0.
+
+    mpk = float(minplayed)/float(k) if float(k) > 0. else 0.
+    return {'kd': round2(kd),
+            'wl': round2(wl),
+            'winrate': round2(winrate),
+            'minperkill': round2(mpk)}
+
+
+def round2(x):
+    return float(str(x)[:4])
+
+
 if __name__ == '__main__':
+    '''
+    r6tabpoller = R6TabPoller()
+    data = r6tabpoller.get_message()
+    print(data)
+
+    '''
     configfile = './config.json'
     telegram_bot = TelegramBot(configfile=configfile)
     telegram_bot.start_bot()
