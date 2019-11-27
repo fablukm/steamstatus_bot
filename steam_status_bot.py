@@ -6,7 +6,7 @@ import steam
 from urllib.request import Request, urlopen
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(format=logformat, level=logging.INFO,
+logging.basicConfig(format=logformat, level=logging.ERROR,
                     filename='./steam_status_bot.log', filemode='w')
 
 
@@ -87,10 +87,10 @@ class TelegramBot(object):
         def handle_help(update, context, DEBUG=False):
             helps = [r'I update this group chat whenever someone starts/stops playing, and/or the servers are down or up again.','',
                      r'You can use the following commands, either here for everyone to see or in a private chat with me, the bot:',
-                     r'    \player_status: Show who is playing and who is not.',
-                     r'    \server_status: Show whether the servers are online.',
-                     r'    \stats: Show basic statistics.',
-                     r'    \help: Show this message.']
+                     r'    /player_status: Show who is playing and who is not.',
+                     r'    /server_status: Show whether the servers are online.',
+                     r'    /stats: Show basic statistics.',
+                     r'    /help: Show this message.']
             msg = '\n'.join(helps)
             if DEBUG:
                 print(msg)
