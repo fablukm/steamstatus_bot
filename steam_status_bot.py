@@ -5,8 +5,6 @@ import json
 import steam
 from urllib.request import Request, urlopen
 
-DEBUG=False
-
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 logging.basicConfig(format=logformat, level=logging.INFO,
                     filename='./steam_status_bot.log', filemode='w')
@@ -86,7 +84,7 @@ class TelegramBot(object):
             logging.info(f'Sent message {msg}')
             return
 
-        def handle_help(update, context):
+        def handle_help(update, context, DEBUG=False):
             helps = [r'I update this group chat whenever someone starts/stops playing, and/or the servers are down or up again.','',
                      r'You can use the following commands, either here for everyone to see or in a private chat with me, the bot:',
                      r'    \player_status: Show who is playing and who is not.',
@@ -138,7 +136,7 @@ class TelegramBot(object):
 
         return do_display, msg
 
-    def configure_bot(self):
+    def configure_bot(self, DEBUG=False):
         '''
         TelegramBot.configure_bot(): Defines commands and reads job queue.
         '''
@@ -398,12 +396,6 @@ def round2(x):
 
 
 if __name__ == '__main__':
-    '''
-    r6tabpoller = R6TabPoller()
-    data = r6tabpoller.get_message()
-    print(data)
-
-    '''
     configfile = './config.json'
     telegram_bot = TelegramBot(configfile=configfile)
     telegram_bot.start_bot()
