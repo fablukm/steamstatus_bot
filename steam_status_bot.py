@@ -1,4 +1,4 @@
-import telegram
+    import telegram
 from telegram.ext import Updater, CommandHandler
 import logging
 import json
@@ -116,8 +116,8 @@ class TelegramBot(object):
 
             if not (new_status['is_pl'] == old_status['is_pl']):
                 do_display = True
-                verb = 'started' if new_status else 'stopped'
-                game = ' '+new_status['game'] if new_status else ''
+                verb = 'started' if new_status['is_pl'] else 'stopped'
+                game = ' '+new_status['game'] if new_status['is_pl'] else ''
                 msg += f'{user} {verb} playing{game}.\n'
 
         self.user_status = new_user_status_all
