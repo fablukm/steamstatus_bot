@@ -11,7 +11,8 @@
                           }
                 },
     "chat_id": "Group Chat ID",
-    "time_interval": 1,
+    "time_interval": 90,
+    "ubipoller_interv_min": 5,
     "personastates": ["Offline",
                       "Online",
                       "Busy",

@@ -1,12 +1,14 @@
-    import telegram
+import telegram
 from telegram.ext import Updater, CommandHandler
 import logging
 import json
 import steam
 from urllib.request import Request, urlopen
+import os, sys
+from datetime import datetime
 
 logformat = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(format=logformat, level=logging.ERROR,
+logging.basicConfig(format=logformat, level=logging.INFO,
                     filename='./steam_status_bot.log', filemode='w')
 
 
@@ -74,8 +76,8 @@ class TelegramBot(object):
 
         def handle_server_status(update, context):
             msg = self.ubiserverpoller.get_message()
+            logging.info(f'Sending message {msg}')
             context.bot.send_message(update.effective_chat.id, text=msg)
-            logging.info(f'Sent message {msg}')
             return
 
         def handle_stats(update, context):
@@ -85,7 +87,7 @@ class TelegramBot(object):
             return
 
         def handle_help(update, context, DEBUG=False):
-            helps = [r'I update this group chat whenever someone starts/stops playing, and/or the servers are down or up again.','',
+            helps = [r'I update this group chat whenever someone starts/stops playing, and/or the servers are down or up again.', '',
                      r'You can use the following commands, either here for everyone to see or in a private chat with me, the bot:',
                      r'    /player_status: Show who is playing and who is not.',
                      r'    /server_status: Show whether the servers are online.',
@@ -96,6 +98,7 @@ class TelegramBot(object):
                 print(msg)
             else:
                 context.bot.send_message(update.effective_chat.id, text=msg)
+            logging.info(f'Sent message {msg}')
             return
 
         handlers = {'player_status': handle_status,
@@ -164,6 +167,7 @@ class TelegramBot(object):
                     print(msg)
                 else:
                     context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
+                    logging.info(f'Sending message: {msg}')
             else:
                 logging.debug('    no changes. not sending message.')
             return
@@ -173,11 +177,25 @@ class TelegramBot(object):
         job_queue.run_repeating(_callback_status, interval=dt)
         return
 
-    def start_bot(self):
+    def start_bot(self, mode):
         if not hasattr(self, 'updater'):
-            self.configure_bot()
-        self.updater.start_polling()
-        logging.info('Bot running')
+            self.configure_bot(DEBUG=False)
+
+        if mode == 'dev':
+            self.updater.start_polling()
+            logging.info('Bot running in dev mode')
+        elif mode == 'prod':
+            PORT = int(os.environ.get("PORT", "8443"))
+            HEROKU_APP_NAME = os.environ.get("HEROKU_APP_NAME")
+            TOKEN = self.config['telegram_bot_token']
+            self.updater.start_webhook(listen="0.0.0.0",
+                                  port=PORT,
+                                  url_path=TOKEN)
+            self.updater.bot.set_webhook(f'https://{HEROKU_APP_NAME}.herokuapp.com/{TOKEN}')
+            logging.info('Bot running in prod mode')
+        else:
+            logging.error("No MODE specified!")
+            sys.exit(1)
         return
 
 
@@ -290,8 +308,12 @@ class UbiServerStatusFinder(object):
         logging.info('Opening UbiServerStatusFinder instance')
         self._configfile = configfile
         self.config = self.read_config()
+        
+        self.server_status = {}
+        self._last_update = datetime.now()
 
         self.url_base = 'https://game-status-api.ubisoft.com/v1/instances?appIds={game_id}'
+        self.is_first_time = True
         return
 
     def read_config(self):
@@ -307,22 +329,29 @@ class UbiServerStatusFinder(object):
 
     def run_query(self, timeout=10):
         game_ids = self.config['game_ids']
-        server_status = {}
-        for game in self.config['game_ids'].keys():
-            if not 'ubi_id' in game_ids[game]:
-                continue
+        t_since_last = datetime.now() - self._last_update
+        interval = float(self.config['ubipoller_interv_min'])
+        sec_since_last = t_since_last.total_seconds()
+        if (sec_since_last>interval*60) or self.is_first_time:
+            logging.info('Getting new Server status for Ubisoft servers...')
+            for game in self.config['game_ids'].keys():
+                if (not 'ubi_id' in game_ids[game]):
+                    continue
 
-            url = self.url_base.format(game_id=game_ids[game]['ubi_id'])
-            with urlopen(url, timeout=timeout) as request:
-                json_data = json.load(request)
-                server_status[game] = json_data[0]['Status']
-        return server_status
+                url = self.url_base.format(game_id=game_ids[game]['ubi_id'])
+                with urlopen(url, timeout=timeout) as request:
+                    json_data = json.load(request)
+                    self.server_status[game] = json_data[0]['Status']
+            self.is_first_time = False
+        else:
+            logging.info(f'Only {sec_since_last//60} minutes since updates. Not polling again.')
+        return self.server_status 
 
     def get_message(self):
-        server_status = self.run_query()
-        msg = '\n'.join(['{} servers are {}.'.format(game, status)
-                         for game, status in server_status.items()])
-        return msg
+        self.run_query()
+        self.msg = '\n'.join(['{} servers are {}.'.format(game, status)
+                         for game, status in self.server_status.items()])
+        return self.msg
 
 
 class R6TabPoller(object):
@@ -396,6 +425,7 @@ def round2(x):
 
 
 if __name__ == '__main__':
+    mode = 'dev'
     configfile = './config.json'
     telegram_bot = TelegramBot(configfile=configfile)
-    telegram_bot.start_bot()
+    telegram_bot.start_bot(mode)
