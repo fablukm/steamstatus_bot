@@ -308,7 +308,7 @@ class UbiServerStatusFinder(object):
         logging.info('Opening UbiServerStatusFinder instance')
         self._configfile = configfile
         self.config = self.read_config()
-        
+
         self.server_status = {}
         self._last_update = datetime.now()
 
@@ -343,9 +343,10 @@ class UbiServerStatusFinder(object):
                     json_data = json.load(request)
                     self.server_status[game] = json_data[0]['Status']
             self.is_first_time = False
+            self._last_update = datetime.now()
         else:
             logging.info(f'Only {sec_since_last//60} minutes since updates. Not polling again.')
-        return self.server_status 
+        return self.server_status
 
     def get_message(self):
         self.run_query()
