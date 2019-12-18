@@ -69,18 +69,21 @@ class TelegramBot(object):
 
     def set_commands(self):
         def handle_status(update, context):
+            logging.info('Received steam status request.')
             msg = self.steamstatusfinder.get_status_string()
             context.bot.send_message(update.effective_chat.id, text=msg)
             logging.info(f'Sent message {msg}')
             return
 
         def handle_server_status(update, context):
+            logging.info('Received server status request.')
             msg = self.ubiserverpoller.get_message()
             logging.info(f'Sending message {msg}')
             context.bot.send_message(update.effective_chat.id, text=msg)
             return
 
         def handle_stats(update, context):
+            logging.info('Received r6tab status request.')
             msg = self.tabwirepoller.get_message()
             context.bot.send_message(update.effective_chat.id, text=msg)
             logging.info(f'Sent message {msg}')
@@ -98,7 +101,7 @@ class TelegramBot(object):
                 print(msg)
             else:
                 context.bot.send_message(update.effective_chat.id, text=msg)
-            logging.info(f'Sent message {msg}')
+            logging.info(f'Sent help message.')
             return
 
         handlers = {'player_status': handle_status,
@@ -159,17 +162,14 @@ class TelegramBot(object):
         def _callback_status(context):
             logging.info('running job queue...')
             do_display, msg = self.define_job_queue()
-            logging.debug(f'    message: {msg}')
             if do_display:
-                logging.debug('    sending message.')
-
                 if DEBUG:
                     print(msg)
                 else:
                     context.bot.send_message(chat_id=int(self.config['chat_id']), text=msg)
-                    logging.info(f'Sending message: {msg}')
+                    logging.info(f'Detected status change. Sending message: {msg}')
             else:
-                logging.debug('    no changes. not sending message.')
+                logging.info('No changes to current status. Not sending message.')
             return
 
         dt = int(self.config["time_interval"])
@@ -269,6 +269,7 @@ class SteamStatusFinder(object):
         is_pl = {user: 'gameid' in status[user].keys()
                  for user in status.keys()}
 
+        logging.info('Getting new User status...')
         # are users playing a game in the list?
         is_pl_valid = {user: {'is_pl': True, 'game': game_ids[status[user]['gameid']]}
                        if is_pl[user] and status[user]['gameid'] in list(game_ids.keys())
